@@ -1,0 +1,157 @@
+# Introduction
+
+Welcome to the FLAMES single sample tutorial!
+
+In this tutorial, we will guide you through a basic analysis of long-read single-cell RNA sequencing data. Our goal is to demonstrate how to use the output from our package, FLAMES, to create and process long-read single-cell data. Here we will focus on using Seurat and other very popular single cell tools for analysis and processing single cell data. Much of this analysis will follow standard short read single cell processing norms, yet with long read data we can also explore isoform-level expression in single cells. This can be very useful as we hope to demonstrate throughout this tutorial.
+
+This tutorial assumes that have;
+
+1.  Run the sc_long_pipeline (to process a single sample) and have set your config file with these parameters set to TRUE
+
+"bambu_isoform_identification": [true] "oarfish_quantification": [true] And
+
+2.  That you have run FLAMES to calculate the ambient RNA profile. An explanation of how to this can be found here: ...
+
+Much of the workflow will remain the same if you decide to use other tools for quantification or isoform discovery, which FLAMES does support, but these are the tools that in our hands perform the best and what we would recommend using at this stage.
+
+This single sample tutorial will use data generated in the Clark lab. This is small dataset of approximately 400 cells. The cells are at Day55 of a excitatory neural differentiation protocol. More information on the dataset and sequencing methodology can be found here ....
+
+If you find this tutorial useful please cite our work...
+
+if you have questions or suggestions please reach out to '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au){.email}' or leave a comment on our github page ....
+
+## load in required packages
+
+```{r load_libs, warning=FALSE, include=FALSE}
+library(rtracklayer)
+library(Seurat)
+library(DropletUtils)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(data.table)
+library(BiocParallel)
+library(celda)
+library(SingleCellExperiment)
+library(DoubletFinder)
+library(stringr)
+library(cowplot)
+library(grid)
+library(patchwork)
+
+
+# and set your working dir 
+setwd("/data/scratch/users/yairp/FLAMES_Day55/analysis/FLAMES_Single_sample_tutorial")
+```
+
+## Creating resource files.
+
+To start, we'll create a few essential files that will be used throughout the analysis. The first step is to generate a CSV file containing three key columns: ENSGID, geneSymbol, and ENSTID. This file will be used to rename entries in both the isoform and gene count matrices, replacing ENSGID with the corresponding gene symbol. By adopting this naming convention for ENSTID, we can easily identify the gene origin of each isoform, streamlining the interpretation and analysis of gene and isoform-level data.
+
+Run this chunk to generate the naming resource
+
+```{r create_gene_symbol_resource, echo=TRUE}
+
+# The FLAMES ref can be found in your selected output folder after running the Flames pipeline.
+flames_gtf_file <- "/data/scratch/users/yairp/FLAMES_Day55/outs/isoform_annotated.gtf"
+refrence_gtf_file <- "/data/scratch/users/yairp/FLAMES_Day55/resources/gencode.v47.annotation.gtf"
+output_file <- "v47_transcript_id_gene_id_gene_symbol.csv"
+
+# Function to make csv naming resource 
+make_gene_isoform_symbol_resource <- function(FLAMES_gtf, referecne_gtf, output_file) {
+  # Import the first GTF file (transcripts GTF)
+  gtf1 <- import(FLAMES_gtf)
+  gtf1_df <- as.data.frame(gtf1)
+  
+  # Select relevant columns from the first GTF
+  selected_columns1 <- gtf1_df[, c("transcript_id", "gene_id")]
+  unique_selected_cols <- unique(selected_columns1)
+  
+  # Import the second GTF file (reference GTF with gene symbols)
+  gtf2 <- import(referecne_gtf)
+  gtf2_df <- as.data.frame(gtf2)
+  
+  # Select relevant columns from the second GTF
+  selected_columns2 <- gtf2_df[, c("gene_name", "gene_id")]
+  unique_gene_symbol <- unique(selected_columns2)
+  
+  # Merge the two data frames on 'gene_id'
+  combined_data <- merge(unique_selected_cols, unique_gene_symbol, by = "gene_id", all.x = TRUE)
+  
+  # If 'gene_name' is missing, replace it with 'gene_id'
+  combined_data$gene_symbol <- ifelse(is.na(combined_data$gene_name), combined_data$gene_id, combined_data$gene_name)
+  
+  # Select relevant columns
+  final_combined_data <- combined_data[, c("transcript_id", "gene_id", "gene_symbol")]
+  
+  # Write to a CSV file
+  write.csv(final_combined_data, file = output_file, row.names = FALSE)
+  
+  return(final_combined_data)
+}
+
+# Call the function
+v47_transcript_id_gene_id_gene_symbol <- make_gene_isoform_symbol_resource(flames_gtf_file, refrence_gtf_file, output_file)
+
+```
+
+## Convert count matrices from Gene ID to gene Symbol
+
+With the reference table in place, we can now rename both our count matrix and background count matrix by converting ENSGIDs to geneSymbols. This conversion not only simplifies the interpretation of gene expression in single cells but is also necessary for some downstream tools that require gene symbols instead of ENSGIDs, such as automated cell annotation tools.
+
+```{r convert_ENSGID_to_geneSymbol, echo=TRUE}
+convert_ENSGID_to_geneSymbol <- function(data_file, ref_table_file, output_file) {
+  # Load the reference table
+  ref_table <- v47_transcript_id_gene_id_gene_symbol %>%
+  select(gene_id, gene_symbol)
+  
+  # Load the data object with ENSGID row names
+  data_obj <- read.csv(data_file, header = TRUE)
+  colnames(data_obj)[1] <- "gene_id"
+  
+  # Merge the data object with the reference table to map ENSGID to gene symbol
+  merged_file <- merge(data_obj, ref_table, by.x = 'gene_id', by.y = 'gene_id')
+  
+  # Identify duplicates based on gene symbol
+  duplicates <- duplicated(merged_file$gene_symbol)
+  
+  # Subset the data frame to remove duplicates
+  df_unique <- subset(merged_file, !duplicates)
+  
+  # Remove unwanted columns (specifically the ENSGID column)
+  df_unique <- df_unique[, !colnames(df_unique) %in% "gene_id"]
+  
+  # Set the last column as row names and remove it from the data frame
+  row.names(df_unique) <- df_unique[, ncol(df_unique)]
+  df_unique <- df_unique[, -ncol(df_unique)]
+  
+  # Write out the processed data frame
+  write.csv(df_unique, output_file, row.names = TRUE)
+  
+  # Return the processed data frame for further use if needed
+  #return(df_unique)
+}
+
+# # convert Gene_id to gene symbol for gene counts
+convert_ENSGID_to_geneSymbol(
+  data_file = "/data/scratch/users/yairp/FLAMES_Day55/outs/gene_count.csv",
+  ref_table_file = v47_transcript_id_gene_id_gene_symbol,
+  output_file = "geneSymbol_gene_count.csv"
+)
+
+# convert Gene_id to gene symbol for background counts
+convert_ENSGID_to_geneSymbol(
+  data_file = "/data/scratch/users/yairp/FLAMES_Day55/background/gene_count.csv",
+  ref_table_file = v47_transcript_id_gene_id_gene_symbol,
+  output_file = "background_geneSymbol_gene_count.csv"
+)
+
+```
+
+now we have the files we need to begin cleaning our data and removing unwanted noise.
+
+# Session info
+
+```{r sessionInfo, echo=FALSE}
+sessionInfo()
+```
