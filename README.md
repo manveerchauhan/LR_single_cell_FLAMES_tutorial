@@ -7,5 +7,5 @@ If you find this tutorial useful please cite our work...
 if you have questions or suggestions please reach out to '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au){.email}' or leave a comment on our github page ....
 
 
-# LR_single_cell_-FLAMES_tutorial
+# LR_single_cell_FLAMES_tutorial
 
