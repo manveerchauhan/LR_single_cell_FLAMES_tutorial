@@ -4,7 +4,7 @@ In this tutorial, we will guide you through a basic analysis of long-read single
 
 If you find this tutorial useful please cite our work...
 
-if you have questions or suggestions please reach out to '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au){.email}' or leave a comment on our github page ....
+if you have questions or suggestions please email '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au)' or leave a comment on this github page.
 
 
 # LR_single_cell_FLAMES_tutorial
