@@ -18,7 +18,9 @@ This single sample tutorial will use data generated in the Clark lab. This is sm
 
 If you find this tutorial useful please cite our work...
 
-if you have questions or suggestions please reach out to '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au){.email}' or leave a comment on our github page ....
+If you have questions or suggestions please email '[sefi.prawer\@unimelb.edu.au](mailto:sefi.prawer@unimelb.edu.au){.email}' or leave a comment on this github page. 
+
+If you wish to run through the tutorial using the data provided in the 'data' folder please ensure you unzip all the files. 
 
 ## load in required packages
 
