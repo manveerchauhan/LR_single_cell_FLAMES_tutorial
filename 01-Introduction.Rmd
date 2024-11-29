@@ -24,7 +24,7 @@ If you wish to run through the tutorial using the data provided in the 'data' fo
 
 ## load in required packages
 
-```{r load_libs, warning=FALSE, include=FALSE}
+```{r load_libs, warning = FALSE, include = FALSE}
 library(rtracklayer)
 library(Seurat)
 library(DropletUtils)
@@ -40,27 +40,24 @@ library(stringr)
 library(cowplot)
 library(grid)
 library(patchwork)
+library(tidyverse)
 
 
-# and set your working dir 
-setwd("/data/scratch/users/yairp/FLAMES_Day55/analysis/FLAMES_Single_sample_tutorial")
+# Set working directory
+setwd("path/to/LR_single_cell_FLAMES_tutorial")  # Set this to correct location
 ```
 
 ## Creating resource files.
 
-To start, we'll create a few essential files that will be used throughout the analysis. The first step is to generate a CSV file containing three key columns: ENSGID, geneSymbol, and ENSTID. This file will be used to rename entries in both the isoform and gene count matrices, replacing ENSGID with the corresponding gene symbol. By adopting this naming convention for ENSTID, we can easily identify the gene origin of each isoform, streamlining the interpretation and analysis of gene and isoform-level data.
+To start, we'll create a few essential files that will be used throughout the analysis. The first step is to generate a CSV file containing three key columns: ENSTID, ENSGID, and geneSymbol. This file will be used as a dictionary to rename entries in both the isoform and gene count matrices, replacing ENSGID with the corresponding gene symbol. By adopting this naming convention for ENSTID, we can easily identify the gene origin of each isoform, streamlining the interpretation and analysis of gene and isoform-level data.
 
-Run this chunk to generate the naming resource
+First lets define a helper function for this step:
 
-```{r create_gene_symbol_resource, echo=TRUE}
-
-# The FLAMES ref can be found in your selected output folder after running the Flames pipeline.
-flames_gtf_file <- "/data/scratch/users/yairp/FLAMES_Day55/outs/isoform_annotated.gtf"
-refrence_gtf_file <- "/data/scratch/users/yairp/FLAMES_Day55/resources/gencode.v47.annotation.gtf"
-output_file <- "v47_transcript_id_gene_id_gene_symbol.csv"
-
+```{r create_gene_symbol_resource, echo = TRUE}
 # Function to make csv naming resource 
-make_gene_isoform_symbol_resource <- function(FLAMES_gtf, referecne_gtf, output_file) {
+make_isoform_gene_symbol_dict <- function(FLAMES_gtf, 
+                                          reference_gtf, 
+                                          output_file) {
   # Import the first GTF file (transcripts GTF)
   gtf1 <- import(FLAMES_gtf)
   gtf1_df <- as.data.frame(gtf1)
@@ -70,7 +67,7 @@ make_gene_isoform_symbol_resource <- function(FLAMES_gtf, referecne_gtf, output_
   unique_selected_cols <- unique(selected_columns1)
   
   # Import the second GTF file (reference GTF with gene symbols)
-  gtf2 <- import(referecne_gtf)
+  gtf2 <- import(reference_gtf)
   gtf2_df <- as.data.frame(gtf2)
   
   # Select relevant columns from the second GTF
@@ -78,10 +75,15 @@ make_gene_isoform_symbol_resource <- function(FLAMES_gtf, referecne_gtf, output_
   unique_gene_symbol <- unique(selected_columns2)
   
   # Merge the two data frames on 'gene_id'
-  combined_data <- merge(unique_selected_cols, unique_gene_symbol, by = "gene_id", all.x = TRUE)
+  combined_data <- merge(unique_selected_cols, 
+                         unique_gene_symbol, 
+                         by = "gene_id", 
+                         all.x = TRUE)
   
   # If 'gene_name' is missing, replace it with 'gene_id'
-  combined_data$gene_symbol <- ifelse(is.na(combined_data$gene_name), combined_data$gene_id, combined_data$gene_name)
+  combined_data$gene_symbol <- ifelse(is.na(combined_data$gene_name), 
+                                      combined_data$gene_id, 
+                                      combined_data$gene_name)
   
   # Select relevant columns
   final_combined_data <- combined_data[, c("transcript_id", "gene_id", "gene_symbol")]
@@ -92,65 +94,83 @@ make_gene_isoform_symbol_resource <- function(FLAMES_gtf, referecne_gtf, output_
   return(final_combined_data)
 }
 
-# Call the function
-v47_transcript_id_gene_id_gene_symbol <- make_gene_isoform_symbol_resource(flames_gtf_file, refrence_gtf_file, output_file)
+```
+
+Run this chunk to create the dictionary containing ENSTID, ENSGID, and geneSymbol information:
+
+```{r create_gene_symbol_resource, echo = TRUE}
+
+# The FLAMES ref can be found in your selected output folder after running the Flames pipeline.
+flames_gtf_file <- "./data/FLAMES_out/isoform_annotated.gtf.gz"
+reference_gtf_file <- "gencode.v47.annotation.gtf.gz"
+output_file <- "isoform_gene_dict.csv"
+
+# Call the helper function defined in code block above to create a dictionary containing corresponding gene information for each isoform
+isoform_gene_dict <- make_isoform_gene_symbol_dict(flames_gtf_file,
+                                                   reference_gtf_file,
+                                                   output_file)
 
 ```
 
 ## Convert count matrices from Gene ID to gene Symbol
 
-With the reference table in place, we can now rename both our count matrix and background count matrix by converting ENSGIDs to geneSymbols. This conversion not only simplifies the interpretation of gene expression in single cells but is also necessary for some downstream tools that require gene symbols instead of ENSGIDs, such as automated cell annotation tools.
+With the reference dictionary in place, we can now rename both our count matrix and background count matrix by converting ENSGIDs to geneSymbols. This conversion not only simplifies the interpretation of gene expression in single cells but is also necessary for some downstream tools that require gene symbols instead of ENSGIDs, such as automated cell annotation tools.
 
-```{r convert_ENSGID_to_geneSymbol, echo=TRUE}
-convert_ENSGID_to_geneSymbol <- function(data_file, ref_table_file, output_file) {
-  # Load the reference table
-  ref_table <- v47_transcript_id_gene_id_gene_symbol %>%
-  select(gene_id, gene_symbol)
+Like before, lets define a generic helper function first to do this:
+
+```{r convert_ENSGID_to_geneSymbol, echo = TRUE}
+convert_ENSGID_to_geneSymbol <- function(gene_count_matrix_path, 
+                                         id_symbol_df = isoform_gene_dict, 
+                                         output_file,
+                                         return_df = FALSE) {
+  
+  # Load the reference dictionary we made earlier - select gene-level cols
+  id_symbol_df <- id_symbol_df %>%
+    dplyr::select(gene_id, gene_symbol)
   
   # Load the data object with ENSGID row names
-  data_obj <- read.csv(data_file, header = TRUE)
-  colnames(data_obj)[1] <- "gene_id"
+  gene_count_matrix <- read.csv(gene_count_matrix_path, header = TRUE)
+  colnames(gene_count_matrix)[1] <- "gene_id"
   
-  # Merge the data object with the reference table to map ENSGID to gene symbol
-  merged_file <- merge(data_obj, ref_table, by.x = 'gene_id', by.y = 'gene_id')
-  
-  # Identify duplicates based on gene symbol
-  duplicates <- duplicated(merged_file$gene_symbol)
-  
-  # Subset the data frame to remove duplicates
-  df_unique <- subset(merged_file, !duplicates)
-  
-  # Remove unwanted columns (specifically the ENSGID column)
-  df_unique <- df_unique[, !colnames(df_unique) %in% "gene_id"]
-  
-  # Set the last column as row names and remove it from the data frame
-  row.names(df_unique) <- df_unique[, ncol(df_unique)]
-  df_unique <- df_unique[, -ncol(df_unique)]
+  # Replace ENSGIDs with gene symbols in original flames gene-level count matrix
+  formatted_gene_count_matrix <- gene_count_matrix %>%
+    merge(id_symbol_df, by.x = 'gene_id', by.y = 'gene_id') %>%   # Add gene symbol information
+    distinct(gene_symbol, .keep_all = TRUE) %>%   # Remove duplicates based on gene symbol
+    select(-gene_id) %>%   # Remove the ENSGID column
+    column_to_rownames(var = "gene_symbol")   # use the gene symbols we added as rownames
   
   # Write out the processed data frame
-  write.csv(df_unique, output_file, row.names = TRUE)
+  write.csv(formatted_gene_count_matrix, 
+            output_file, 
+            row.names = TRUE)
   
-  # Return the processed data frame for further use if needed
-  #return(df_unique)
+  # Return the processed count matrix for further use if needed
+  if(return_df){
+    return(formatted_gene_count_matrix)
+  }
 }
 
-# # convert Gene_id to gene symbol for gene counts
+```
+
+Run the chunk below to format gene-level count matrices for background and FLAMES data using the helper function from above:
+
+```{r convert_ENSGID_to_geneSymbol, echo=TRUE}
+
+# convert Gene_id to gene symbol for gene counts
 convert_ENSGID_to_geneSymbol(
-  data_file = "/data/scratch/users/yairp/FLAMES_Day55/outs/gene_count.csv",
-  ref_table_file = v47_transcript_id_gene_id_gene_symbol,
+  gene_count_matrix_path = "./data/FLAMES_out/gene_count.csv.gz",
   output_file = "geneSymbol_gene_count.csv"
 )
 
 # convert Gene_id to gene symbol for background counts
 convert_ENSGID_to_geneSymbol(
-  data_file = "/data/scratch/users/yairp/FLAMES_Day55/background/gene_count.csv",
-  ref_table_file = v47_transcript_id_gene_id_gene_symbol,
+  gene_count_matrix_path = "./data/background/gene_count.csv.gz",
   output_file = "background_geneSymbol_gene_count.csv"
 )
 
 ```
 
-now we have the files we need to begin cleaning our data and removing unwanted noise.
+Now we have the files we need to begin cleaning our data and removing unwanted noise.
 
 # Session info
 
