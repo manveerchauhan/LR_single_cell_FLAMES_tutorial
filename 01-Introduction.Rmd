@@ -28,8 +28,6 @@ If you wish to run through the tutorial using the data provided in the 'data' fo
 library(rtracklayer)
 library(Seurat)
 library(DropletUtils)
-library(dplyr)
-library(ggplot2)
 library(gridExtra)
 library(data.table)
 library(BiocParallel)
