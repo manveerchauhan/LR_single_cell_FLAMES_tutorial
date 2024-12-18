@@ -8,14 +8,14 @@ editor_options:
     wrap: sentence
 ---
 
-# Removing sources of unwanted noise from the single cell dataset 
+# Removing sources of unwanted noise from the single cell dataset
 
 Now we will do some initial prepossessing of single cell data to ensure we have some high quality data.
 This will involve 3 main steps 1.
 removing empty droplets - droplets that do not contain true cells.
 2.
 removing ambient RNA contamination 3.
-removing low quality cells that
+removing low quality cells as defined by mitochondrial gene percentages, UMIs and genes per cell.
 
 ### Empty droplets
 
