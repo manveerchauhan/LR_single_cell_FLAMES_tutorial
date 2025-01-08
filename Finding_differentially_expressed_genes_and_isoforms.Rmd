@@ -6,7 +6,6 @@ first we will look at marker genes for each cluster. This will help us identify 
 
 ```{r perform_marker_gene_analysis, echo=TRUE, message=FALSE, warning=FALSE, echo=FALSE}
 #Find markers for all clusters using the "RNA" and "iso" assay
-#One
 
 all_markers_gene <- FindAllMarkers(seu_obj, assay = "RNA", do.print = TRUE,
                                        logfc.threshold = 0.5, min.pct = 0.20, only.pos = TRUE) %>% filter(p_val_adj < 0.05)
@@ -14,9 +13,10 @@ all_markers_gene <- FindAllMarkers(seu_obj, assay = "RNA", do.print = TRUE,
 all_markers_iso <- FindAllMarkers(seu_obj, assay = "iso", do.print = TRUE,
                                       logfc.threshold = 0.5, min.pct = 0.20, only.pos = TRUE) %>% filter(p_val_adj < 0.05)
 
-#save the list of DE genes 
-write.csv(all_markers_one_gene, "./DE_genes_and_isoforms/all_markers_one_gene.csv")
-write.csv(all_markers_one_iso, "./DE_genes_and_isoforms/all_markers_one_iso.csv")
+#save the list of DE genes
+dir.create("./DE_genes_and_isoforms", showWarnings = FALSE, recursive = TRUE)
+write.csv(all_markers_gene, "./DE_genes_and_isoforms/all_markers_gene.csv")
+write.csv(all_markers_iso, "./DE_genes_and_isoforms/all_markers_iso.csv")
 
 ```
 

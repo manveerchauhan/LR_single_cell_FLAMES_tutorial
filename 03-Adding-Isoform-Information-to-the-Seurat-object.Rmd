@@ -11,8 +11,10 @@ Now that we have 309 high-quality cells for our downstream analysis, let's incor
 
 ```{r process_oarfish_file, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
 #This function reads in Oarfish count files and creates a csv file of count data. The function also appends the gene symbol to the ENSTID
-process_oarfish_files_to_counts_matrix <- function(flames_output_folder, sample_name, output_dir) {
-
+process_oarfish_files_to_counts_matrix <- function(flames_output_folder, 
+                                                   sample_name, 
+                                                   output_dir,
+                                                   isoform_gene_dict = read.csv("isoform_gene_dict.csv")) {
   # Read in the resource table (transcript_id, gene_id, gene_symbol)
   # Define the file paths based on the sample name
   count_matrix_path <- file.path(flames_output_folder, paste0(sample_name, ".count.mtx"))
@@ -40,8 +42,8 @@ process_oarfish_files_to_counts_matrix <- function(flames_output_folder, sample_
   
   # Merge with the resource table to add gene symbols
   df_genesymbol <- counts_df %>%
-    left_join(v47_transcript_id_gene_id_gene_symbol, by = "transcript_id")
-  
+    left_join(isoform_gene_dict, by = "transcript_id")
+
   # Remove the gene_id column and reorder the columns
   df_genesymbol$gene_id <- NULL
   df_genesymbol <- df_genesymbol[, c(ncol(df_genesymbol), 1:(ncol(df_genesymbol)-1))]
@@ -61,13 +63,12 @@ process_oarfish_files_to_counts_matrix <- function(flames_output_folder, sample_
 }
 
 oarfish_counts <- process_oarfish_files_to_counts_matrix(
-  flames_output_folder = "/data/scratch/users/yairp/FLAMES_Day55/outs/",
+  flames_output_folder = "./data//FLAMES_out",
   sample_name = "oarfish",
-  output_dir = "."
-    )
+  output_dir = ".")
 
 # Create the Seurat object with iso counts
-iso_seurat_obj <- CreateSeuratObject(counts = oarfish_counts, project = sample_id)
+iso_seurat_obj <- CreateSeuratObject(counts = oarfish_counts, project = "FLAMES_Tutorial")
 
 VlnPlot(iso_seurat_obj, features = c("nFeature_RNA", "nCount_RNA"), ncol = 2) + plot_annotation(title = "QC plots (isoform level) BEFORE Filtering")
 
@@ -78,10 +79,13 @@ We have now created a Seurat object with isoform-level count data. Users can tak
 Since we've already filtered out low-quality cells based on our gene-level data, we’ll use these high-quality cells to filter our isoform data.
 
 ```{r isoform_assay, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+filt_seurat_object <- readRDS("Day55_tutorial_umap_object.rds")
+
 
 #### isofrom assay 
 ## filter the data so iso and gene cells match
-oarfish_iso_matched_gene <- subset(iso_seurat_obj, cells =filt_seurat_object@graphs[["RNA_nn"]]@Dimnames[[1]])
+oarfish_iso_matched_gene <- subset(iso_seurat_obj, 
+                                   cells = filt_seurat_object@graphs[["RNA_nn"]]@Dimnames[[1]])
 
 #Rejoin data sets after integration
 oarfish_iso_matched_gene <- JoinLayers(oarfish_iso_matched_gene)
@@ -99,7 +103,6 @@ filt_seurat_object <- NormalizeData(filt_seurat_object, assay = "iso")
 filt_seurat_object <- FindVariableFeatures(filt_seurat_object, assay = "iso")
 filt_seurat_object <- ScaleData(filt_seurat_object, assay = "iso")
 filt_seurat_object <- RunPCA(filt_seurat_object, assay = "iso", reduction.name = "pca_iso")
-
 #Run UMAP
 filt_seurat_object <- RunUMAP(filt_seurat_object, reduction = "pca_iso", dims = 1:15,
                              assay = "iso", reduction.name = "umap_iso")
@@ -129,14 +132,22 @@ plot_features_list <- grep(paste0("(^|-|\\b)", gene, "($|\\b)"), features, value
 
 #We can now plot our favorite gene and all its corresponding isoforms on either the gene or isoform UMAPs. To switch between them, simply change the reduction argument to the desired UMAP (either the gene or isoform reduction)
 
-FeaturePlot(filt_seurat_object, features = plot_features_list, reduction = "umap_iso") 
-FeaturePlot(filt_seurat_object, features = gene, reduction = "umap")
+FeaturePlot(filt_seurat_object, 
+            features = plot_features_list, 
+            reduction = "umap_iso",
+            order = T) 
+FeaturePlot(filt_seurat_object, 
+            features = gene, 
+            reduction = "umap",
+            order = T)
 
 #lets also plot the isoform data on the gene level clsuters.
-FeaturePlot(filt_seurat_object, features = plot_features_list, reduction = "umap") +
+FeaturePlot(filt_seurat_object, 
+            features = plot_features_list, 
+            reduction = "umap",
+            order = T) +
   plot_annotation(
     title = 'VIM isoform expresstion plotted on gene level clusters',
-    #caption = 'made with patchwork',
     theme = theme(plot.title = element_text(size = 20))
   )
 
@@ -145,11 +156,20 @@ plot_features_list <- grep(paste0("(^|-|\\b)", gene, "($|\\b)"), features, value
 
 #We can now plot our favorite gene and all its corresponding isoforms on either the gene or isoform UMAPs. To switch between them, simply change the reduction argument to the desired UMAP (either the gene or isoform reduction)
 
-FeaturePlot(filt_seurat_object, features = plot_features_list, reduction = "umap_iso") 
-FeaturePlot(filt_seurat_object, features = gene, reduction = "umap")
+FeaturePlot(filt_seurat_object, 
+            features = plot_features_list, 
+            reduction = "umap_iso",
+            order = T) 
+FeaturePlot(filt_seurat_object, 
+            features = gene, 
+            reduction = "umap",
+            order = T)
 
 #lets also plot the isoform data on the gene level clsuters.
-FeaturePlot(filt_seurat_object, features = plot_features_list, reduction = "umap") +
+FeaturePlot(filt_seurat_object, 
+            features = plot_features_list, 
+            reduction = "umap",
+            order = T) +
   plot_annotation(
     title = 'TBR1 isoform expresstion plotted on gene level clusters',
     #caption = 'made with patchwork',
