@@ -31,7 +31,7 @@ library(DropletUtils)
 library(gridExtra)
 library(data.table)
 library(BiocParallel)
-library(celda)
+#library(celda) # Couldn't install this package for current version of R (problem with enrichR dependency)
 library(SingleCellExperiment)
 library(DoubletFinder)
 library(stringr)
@@ -100,7 +100,7 @@ Run this chunk to create the dictionary containing ENSTID, ENSGID, and geneSymbo
 
 # The FLAMES ref can be found in your selected output folder after running the Flames pipeline.
 flames_gtf_file <- "./data/FLAMES_out/isoform_annotated.gtf.gz"
-reference_gtf_file <- "gencode.v47.annotation.gtf.gz"
+reference_gtf_file <- "/data/gpfs/projects/punim2251/resoucres/gencode.v47.annotation.gtf.gz"
 output_file <- "isoform_gene_dict.csv"
 
 # Call the helper function defined in code block above to create a dictionary containing corresponding gene information for each isoform

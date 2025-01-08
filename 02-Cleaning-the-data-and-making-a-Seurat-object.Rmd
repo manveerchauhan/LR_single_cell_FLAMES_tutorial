@@ -1,6 +1,7 @@
 ---
 title: "Cleaning the data"
 author: "Sefi"
+co-author: "Manveer"
 date: "`r Sys.Date()`"
 output: html_document
 editor_options: 
@@ -16,6 +17,58 @@ removing empty droplets - droplets that do not contain true cells.
 2.
 removing ambient RNA contamination 3.
 removing low quality cells as defined by mitochondrial gene percentages, UMIs and genes per cell.
+
+### Choosing an appropriate cluster resolution with Sillouhette Scoring
+
+The subsequent steps in this script depend on the number of clusters generated during Seurat's unsupervised clustering step, performed using the FindClusters() function.
+The number of clusters produced by FindClusters() is determined by the value of the resolution parameter.
+This parameter controls the granularity of the clustering: higher values generally result in more clusters, while lower values produce fewer.
+Selecting an appropriate resolution can often be challenging.
+
+A useful method for determining an initial resolution is to evaluate different values using a metric known as the silhouette score.
+The silhouette score quantifies how similar a cell is to its assigned cluster compared to other clusters, offering insights into cluster compactness and separation.
+By comparing silhouette scores across a range of resolutions, you can identify a value that balances meaningful clustering with biological relevance, avoiding over- or under-clustering.
+
+While this step is optional, it provides a solid starting point for new analyses.
+The chosen cluster resolution can be adjusted later based on additional background knowledge or your specific project needs.
+
+This helper function below takes a Seurat object that has been processed with the NormalizeData(), ScaleData(), RunPCA(), and FindNeighbors() functions.
+It outputs the cluster resolution with the highest silhouette score that you can use when you run FindClusters().
+It uses code from silhouette.R, sourced from the repository: <https://github.com/kidcancerlab/rrrSingleCellUtils>
+
+```{r perform_empty_drops_analysis, echo=TRUE, message=FALSE, warning=FALSE, echo=FALSE}
+find_optimal_cluster_resolution <- function(seurat.obj,
+                                     min_resolution = 0.1,
+                                     max_resolution = 1.2,
+                                     resolution_step = 0.1,
+                                     silhouette_utils_path = "silhouette.R") {
+  # import silhouette functions from silhouette R script (rrrSingleCellUtils github repo)
+  source(silhouette_utils_path)
+  
+  # Calculate silhouette scores for different resolutions
+  avg.clusterSilVal.list <- as.data.frame(optimize_silhouette(
+    sobject = seurat.obj,
+    test_res = seq(min_resolution, max_resolution, by = resolution_step),
+    summary_plot = TRUE,
+    reduction = "pca"
+  ))
+  
+  # Filter and format results
+  avg.clusterSilVal.list.filtered <- avg.clusterSilVal.list %>%
+    dplyr::rename(avg_sil_vals = sil_vals) %>%
+    group_by(num_clusters) %>%
+    dplyr::slice(which.max(avg_sil_vals)) %>%
+    ungroup() %>%
+    arrange(desc(avg_sil_vals)) %>% 
+    mutate(avg_sil_vals = round(avg_sil_vals, 4)) %>% 
+    slice_head(n = 5)
+  
+  print(avg.clusterSilVal.list.filtered)
+  
+  # return the cluster resolution with the highest silouhette score
+  return(avg.clusterSilVal.list.filtered[1,1])
+}
+```
 
 ### Empty droplets
 
@@ -36,17 +89,26 @@ perform_empty_drops_analysis <- function(output_path, gene_count_file, empty_dro
   seurat_obj <- CreateSeuratObject(counts = df, project = "Day_55", min.features = 20)
   seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
   VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+  
   #seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 10 & nFeature_RNA < 100000 & percent.mt < 100)
+  
   seurat_obj <- NormalizeData(seurat_obj, normalization.method = "LogNormalize", scale.factor = 10000)
   seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000)
   all.genes <- rownames(seurat_obj)
   seurat_obj <- ScaleData(seurat_obj, features = all.genes)
   seurat_obj <- RunPCA(seurat_obj, features = VariableFeatures(object = seurat_obj))
-  ElbowPlot(seurat_obj)
-  seurat_obj <- FindNeighbors(seurat_obj, dims = 1:10)
-  seurat_obj <- FindClusters(seurat_obj, resolution = 0.5)
-  seurat_obj <- RunUMAP(seurat_obj, dims = 1:10)
-  DimPlot(seurat_obj, reduction = "umap")
+  
+  grid.draw(ElbowPlot(seurat_obj))
+  
+  seurat_obj <- FindNeighbors(seurat_obj, dims = 1:20)
+  
+  # Call sillouhete helper function to calculate optimal cluster resolution
+  OPTIMAL_CLUSTER_RES <- find_optimal_cluster_resolution(seurat_obj)
+  
+  seurat_obj <- FindClusters(seurat_obj, resolution = OPTIMAL_CLUSTER_RES)
+  seurat_obj <- RunUMAP(seurat_obj, dims = 1:20)
+  
+  grid.draw(DimPlot(seurat_obj, reduction = "umap"))
   
   # Define function to make dgCMatrix from combined counts
   makedgcmatrix <- function(count.matrix) {
@@ -175,7 +237,7 @@ Now we will remove ambient RNA contamination using decontX (or SoupX).
 This step is optional, and it's up to the user to decide whether it's necessary.
 In this case, the barcode rank plot ([found here...]{.underline}) shows a clear distinction between true barcodes and background barcodes, suggesting that ambient RNA contamination may not significantly contribute to noise in this dataset.
 However, we’ll demonstrate how to run this step in case your barcode rank plot is noisier and contamination is a concern.
-if users wish to skip this step take the 'seurat_obj_rm_empty' object and proceed to standard gene QC step.
+if users wish to skip this step take the 'removed_empty' seurat object (saved as an RDS file from the code block above) and proceed to standard gene QC steps.
 
 ```{r decontX}
 # Function to run decontX on a single Seurat object
@@ -244,7 +306,11 @@ run_decontX <- function(seurat_obj_path, background_counts_path, sample_id) {
   # PCA and clustering
   seurat_obj <- RunPCA(seurat_obj)
   seurat_obj <- FindNeighbors(seurat_obj, dims = 1:20)
-  seurat_obj <- FindClusters(seurat_obj, resolution = 0.7)
+  
+  # Call sillouhete helper function to calculate optimal cluster resolution
+  OPTIMAL_CLUSTER_RES <- find_optimal_cluster_resolution(seurat_obj)
+  
+  seurat_obj <- FindClusters(seurat_obj, resolution = OPTIMAL_CLUSTER_RES)
   
   # UMAP
   seurat_obj <- RunUMAP(seurat_obj, dims = 1:20)
@@ -285,6 +351,7 @@ run_decontX <- function(seurat_obj_path, background_counts_path, sample_id) {
   return(list(seurat_obj = seurat_obj, decontaminated_counts = decontaminated_counts, contamination_summary = contamination_summary))
 }
 
+library(decontX)
 # Run decontX on the input Seurat object and background counts file
 deconx_results <- run_decontX("removed_empty_Day55.rds", "background_geneSymbol_gene_count.csv", "Day55")
 ```
@@ -332,7 +399,6 @@ max.counts = 100000
 MT = 10
 npc = 15
 doublet_rate = 0.039
-cluster_res = 0.9
 
 
 filt_seurat_object <- subset(seurat_object, subset = nFeature_RNA > min.features & nFeature_RNA < max.features & percent.mt < MT & nCount_RNA < max.counts & nCount_RNA > min.counts)
@@ -353,10 +419,14 @@ filt_seurat_object <- ScaleData(filt_seurat_object, features = all_genes)
   
 # Perform PCA
 filt_seurat_object <- RunPCA(filt_seurat_object, features = VariableFeatures(object = filt_seurat_object))
-  
+
 # Cluster cells
 filt_seurat_object <- FindNeighbors(filt_seurat_object, dims = 1:npc)
-filt_seurat_object <- FindClusters(filt_seurat_object, resolution = cluster_res)
+
+# Call sillouhete helper function to calculate optimal cluster resolution
+OPTIMAL_CLUSTER_RES = find_optimal_cluster_resolution(filt_seurat_object)
+
+filt_seurat_object <- FindClusters(filt_seurat_object, resolution = OPTIMAL_CLUSTER_RES)
   
 # Perform UMAP
 filt_seurat_object <- RunUMAP(filt_seurat_object, dims = 1:npc)
@@ -410,8 +480,8 @@ Fplot2 <- FeaturePlot(filt_seurat_object, reduction = "umap", features = 'nFeatu
   ggplot_list <- list(plot_pc, plot_scatter2, umap_plot, Fplot1, Fplot2, p2)
   combined_plots <- plot_grid(plotlist = ggplot_list, ncol = 2)
 
-  plot(combined_plots)
-  plot(doublets)
+  plot(combined_plots) # Export these as pdf [WIP]
+  plot(doublets) # Export these as pdf [WIP]
   
   tbl_sts1 <- tableGrob(statsDoublets)
   grid.newpage()
@@ -430,6 +500,7 @@ Fplot2 <- FeaturePlot(filt_seurat_object, reduction = "umap", features = 'nFeatu
                         "Max Counts" = max.counts,
                         "MT Percentage" = MT,
                         "NPCs" = npc,
+                        "Cluster Resolution" = OPTIMAL_CLUSTER_RES,
                         "Median Percent MT before Filter" = median(seurat_object@meta.data[["percent.mt"]]),
                         "Median Percent MT after Filter" = median(filt_seurat_object@meta.data[["percent.mt"]])
                         )
